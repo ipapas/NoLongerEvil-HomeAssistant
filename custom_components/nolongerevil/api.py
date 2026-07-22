@@ -109,8 +109,10 @@ class NLEDeviceStatus:
         self.target_temperature = data.get("target_temperature")
         # Control API reports mode directly: heat | cool | range | off |
         # emergency. The hvac_mode property below maps range -> heat-cool and
-        # emergency -> heat, matching the cloud behaviour.
-        self.target_temperature_type = data.get("mode", "heat")
+        # emergency -> heat, matching the cloud behaviour. Leave this None when
+        # the payload omits the mode so the coordinator can restore the last
+        # known value rather than silently defaulting to "heat".
+        self.target_temperature_type: str | None = data.get("mode")
         self.target_temperature_low = data.get("target_temperature_low")
         self.target_temperature_high = data.get("target_temperature_high")
 
@@ -172,8 +174,11 @@ class NLEDeviceStatus:
         # Current state
         self.current_temperature: float | None = shared_data.get("current_temperature")
         self.target_temperature: float | None = shared_data.get("target_temperature")
-        self.target_temperature_type: str = shared_data.get(
-            "target_temperature_type", "heat"
+        # Leave this None when the payload omits the mode so the coordinator
+        # can restore the last known value rather than silently defaulting to
+        # "heat" (which would flip a cooling unit into heating).
+        self.target_temperature_type: str | None = shared_data.get(
+            "target_temperature_type"
         )
         self.target_temperature_low: float | None = shared_data.get(
             "target_temperature_low"
@@ -216,6 +221,10 @@ class NLEDeviceStatus:
     @property
     def hvac_mode(self) -> str:
         """Return the current HVAC mode."""
+        if self.target_temperature_type is None:
+            # The coordinator's mode latch normally resolves a missing mode
+            # before this is read; fall back to "heat" if it hasn't.
+            return "heat"
         if self.target_temperature_type == "range":
             return "heat-cool"
         if self.target_temperature_type == "emergency":
