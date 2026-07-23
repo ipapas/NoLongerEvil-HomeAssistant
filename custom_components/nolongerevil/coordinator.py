@@ -58,11 +58,8 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             for device in devices
         }
 
-        # Remember the last HVAC mode the API reported for each device. The
-        # Nest API occasionally returns a status payload with no thermostat
-        # mode; reuse the last known value instead of defaulting to "heat".
-        # Pre-populate from persisted config entry data so it survives HA
-        # restarts and integration reloads.
+        # The API occasionally omits a thermostat's mode. Restore the cache
+        # across restarts and reloads so an omission does not become "heat".
         persisted_modes: dict[str, str] = config_entry.data.get("mode_cache", {})
         self._mode_cache: dict[str, str] = {
             device.id: persisted_modes[device.id]
@@ -233,63 +230,30 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         _LOGGER.debug("Persisted capability cache: %s", self._capability_cache)
 
     def _apply_mode_latch(self, device_id: str, status: NLEDeviceStatus) -> None:
-        """Remember the last reported HVAC mode and reuse it when missing.
+        """Remember a reported HVAC mode or restore the last known value.
 
-        The Nest API occasionally returns a status payload with no thermostat
-        mode. Rather than falling back to a hard-coded "heat" (which would flip
-        a cooling unit into heating), reuse the last mode the API actually
-        reported for this device. Only when no mode has ever been seen do we
-        fall back to "heat".
+        Only explicit API values replace the cache; a missing value reuses it.
         """
         api_mode = status.target_temperature_type
-
-        if api_mode is not None:
-            # The API provided a mode — remember it. Persist only when it
-            # changes so we don't rewrite the config entry every poll.
-            if self._mode_cache.get(device_id) != api_mode:
-                self._mode_cache[device_id] = api_mode
-                self._persist_mode_cache()
+        if api_mode is None:
+            status.target_temperature_type = self._mode_cache.get(device_id, "heat")
             return
+        self._remember_mode(device_id, api_mode)
 
-        # The API omitted the mode — restore the last known one, or default
-        # to "heat" if we've never seen a mode for this device.
-        cached_mode = self._mode_cache.get(device_id)
-        if cached_mode is not None:
-            _LOGGER.debug(
-                "Device %s: API returned no HVAC mode — using last known mode %s",
-                device_id,
-                cached_mode,
-            )
-            status.target_temperature_type = cached_mode
-        else:
-            _LOGGER.debug(
-                "Device %s: API returned no HVAC mode and none is cached — "
-                "defaulting to heat",
-                device_id,
-            )
-            status.target_temperature_type = "heat"
+    def _remember_mode(self, device_id: str, mode: str) -> None:
+        """Cache and persist a device's last known HVAC mode when it changes."""
+        if self._mode_cache.get(device_id) != mode:
+            self._mode_cache[device_id] = mode
+            self._persist_mode_cache()
 
     def _persist_mode_cache(self) -> None:
-        """Persist the last-known HVAC modes to config entry data.
-
-        This ensures the last provided mode survives HA restarts and
-        integration reloads.
-        """
+        """Persist modes so the latch survives restarts and reloads."""
         new_data = {**self.config_entry.data, "mode_cache": self._mode_cache}
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
         _LOGGER.debug("Persisted mode cache: %s", self._mode_cache)
 
     def get_capabilities(self, device_id: str) -> dict[str, bool]:
-        """Return the latched heat/cool capabilities for a device.
-
-        This reflects the persisted capability latch, not a single poll's
-        payload, so it is stable across the pre-first-poll window and never
-        regresses to False. Entities should advertise supported modes from
-        this rather than from a live status object — HomeKit caches a
-        thermostat's valid HVAC modes on first read and will not reliably
-        refresh them, so a transient can_cool=False during the first poll
-        would otherwise lock the accessory into heat-only.
-        """
+        """Return stable heat/cool capabilities rather than one poll's values."""
         return self._capability_cache.get(
             device_id, {"can_cool": False, "can_heat": False}
         )
@@ -327,6 +291,12 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
     async def async_set_hvac_mode(self, device_id: str, mode: str) -> None:
         """Set HVAC mode for a device."""
         await self.client.set_hvac_mode(device_id, mode)
+        # Cache after a successful write but before refreshing: the immediate
+        # status response may omit the mode and must restore the new value.
+        self._remember_mode(
+            device_id,
+            "range" if mode == "heat-cool" else mode,
+        )
         await self.async_request_refresh()
 
     async def async_set_away_mode(self, device_id: str, away: bool) -> None:

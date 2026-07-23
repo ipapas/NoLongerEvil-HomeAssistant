@@ -31,23 +31,6 @@ from .exceptions import NLEError
 _LOGGER = logging.getLogger(__name__)
 
 
-def _hvac_modes_from_caps(caps: dict[str, bool]) -> list[HVACMode]:
-    """Build the advertised HVAC mode list from latched heat/cool capabilities.
-
-    Shared by __init__ (the seed HomeKit reads when it first builds the
-    accessory) and the hvac_modes property (what HA re-reads live) so the two
-    can never disagree and advertise a narrower mode set to HomeKit.
-    """
-    modes = [HVACMode.OFF]
-    if caps["can_heat"]:
-        modes.append(HVACMode.HEAT)
-    if caps["can_cool"]:
-        modes.append(HVACMode.COOL)
-    if caps["can_heat"] and caps["can_cool"]:
-        modes.append(HVACMode.HEAT_COOL)
-    return modes
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -92,48 +75,27 @@ class NLEClimate(NLEEntity, ClimateEntity):
             | ClimateEntityFeature.TURN_ON
         )
 
-        # Seed the advertised HVAC modes from the *persisted* capability latch,
-        # not a bare [OFF]. HA's HomeKit bridge snapshots a thermostat's valid
-        # HVAC modes when it first builds the accessory and only refreshes them
-        # if the attribute later changes while HomeKit is running. If the first
-        # state write were heat-only (because caps hadn't been polled yet),
-        # HomeKit could latch onto heat-only and miss the later widening. The
-        # persisted latch is available synchronously here, so advertise the full
-        # mode set from the very first state write.
-        self._attr_hvac_modes = _hvac_modes_from_caps(
-            coordinator.get_capabilities(self._device_id)
-        )
         self._attr_fan_modes = [FAN_MODE_AUTO, FAN_MODE_ON, FAN_MODE_OFF]
 
         # Add target temp range support for heat-cool mode
         self._attr_supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
 
-    async def async_added_to_hass(self) -> None:
-        """Log the latched capabilities HomeKit will be handed at setup."""
-        await super().async_added_to_hass()
-        caps = self.coordinator.get_capabilities(self._device_id)
-        _LOGGER.debug(
-            "Device %s exposing hvac_modes=%s (latched can_heat=%s, can_cool=%s)",
-            self._device_id,
-            self.hvac_modes,
-            caps["can_heat"],
-            caps["can_cool"],
-        )
-
     @property
     def hvac_modes(self) -> list[HVACMode]:
-        """Return the list of available HVAC modes.
+        """Return HVAC modes from the persisted capability latch.
 
-        Sourced from the coordinator's latched capability cache rather than a
-        live status object. HomeKit caches a thermostat's valid HVAC modes on
-        first read and will not reliably refresh them, so advertising modes
-        from a single poll (which can transiently report can_cool=False, or be
-        None before the first poll) risks locking the HomeKit accessory into
-        heat-only. The latched cache only ever grows and survives restarts.
+        HomeKit caches the modes available when it creates the accessory, so a
+        transiently incomplete status must not narrow the advertised mode list.
         """
-        return _hvac_modes_from_caps(
-            self.coordinator.get_capabilities(self._device_id)
-        )
+        caps = self.coordinator.get_capabilities(self._device_id)
+        modes = [HVACMode.OFF]
+        if caps["can_heat"]:
+            modes.append(HVACMode.HEAT)
+        if caps["can_cool"]:
+            modes.append(HVACMode.COOL)
+        if caps["can_heat"] and caps["can_cool"]:
+            modes.append(HVACMode.HEAT_COOL)
+        return modes
 
     @property
     def hvac_mode(self) -> HVACMode | None:

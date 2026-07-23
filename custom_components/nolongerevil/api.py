@@ -107,11 +107,8 @@ class NLEDeviceStatus:
 
         self.current_temperature = data.get("current_temperature")
         self.target_temperature = data.get("target_temperature")
-        # Control API reports mode directly: heat | cool | range | off |
-        # emergency. The hvac_mode property below maps range -> heat-cool and
-        # emergency -> heat, matching the cloud behaviour. Leave this None when
-        # the payload omits the mode so the coordinator can restore the last
-        # known value rather than silently defaulting to "heat".
+        # Do not default an omitted mode to "heat" here. The API occasionally
+        # omits this field, so the coordinator restores the last known mode.
         self.target_temperature_type: str | None = data.get("mode")
         self.target_temperature_low = data.get("target_temperature_low")
         self.target_temperature_high = data.get("target_temperature_high")
@@ -174,9 +171,8 @@ class NLEDeviceStatus:
         # Current state
         self.current_temperature: float | None = shared_data.get("current_temperature")
         self.target_temperature: float | None = shared_data.get("target_temperature")
-        # Leave this None when the payload omits the mode so the coordinator
-        # can restore the last known value rather than silently defaulting to
-        # "heat" (which would flip a cooling unit into heating).
+        # Do not default an omitted mode to "heat" here. The API occasionally
+        # omits this field, so the coordinator restores the last known mode.
         self.target_temperature_type: str | None = shared_data.get(
             "target_temperature_type"
         )
@@ -222,8 +218,7 @@ class NLEDeviceStatus:
     def hvac_mode(self) -> str:
         """Return the current HVAC mode."""
         if self.target_temperature_type is None:
-            # The coordinator's mode latch normally resolves a missing mode
-            # before this is read; fall back to "heat" if it hasn't.
+            # Statuses normally pass through the coordinator's mode latch first.
             return "heat"
         if self.target_temperature_type == "range":
             return "heat-cool"
