@@ -279,6 +279,21 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
         _LOGGER.debug("Persisted mode cache: %s", self._mode_cache)
 
+    def get_capabilities(self, device_id: str) -> dict[str, bool]:
+        """Return the latched heat/cool capabilities for a device.
+
+        This reflects the persisted capability latch, not a single poll's
+        payload, so it is stable across the pre-first-poll window and never
+        regresses to False. Entities should advertise supported modes from
+        this rather than from a live status object — HomeKit caches a
+        thermostat's valid HVAC modes on first read and will not reliably
+        refresh them, so a transient can_cool=False during the first poll
+        would otherwise lock the accessory into heat-only.
+        """
+        return self._capability_cache.get(
+            device_id, {"can_cool": False, "can_heat": False}
+        )
+
     def get_device(self, device_id: str) -> NLEDevice | None:
         """Get device info by ID."""
         return self.devices.get(device_id)
