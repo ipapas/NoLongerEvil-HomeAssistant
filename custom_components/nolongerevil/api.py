@@ -107,8 +107,10 @@ class NLEDeviceStatus:
 
         self.current_temperature = data.get("current_temperature")
         self.target_temperature = data.get("target_temperature")
-        # Do not default an omitted mode to "heat" here. The API occasionally
-        # omits this field, so the coordinator restores the last known mode.
+        # Control API modes are heat | cool | range | off | emergency. The
+        # hvac_mode property maps range -> heat-cool and emergency -> heat.
+        # Do not default an omitted mode here; the coordinator restores the
+        # last known value instead.
         self.target_temperature_type: str | None = data.get("mode")
         self.target_temperature_low = data.get("target_temperature_low")
         self.target_temperature_high = data.get("target_temperature_high")
