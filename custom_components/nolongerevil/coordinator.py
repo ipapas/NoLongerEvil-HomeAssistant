@@ -112,6 +112,9 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     # Preserve the last complete snapshot when shared state is omitted.
                     previous_status = self.get_device_status(device_id)
                     if previous_status is not None:
+                        cached_mode = self._mode_cache.get(device_id)
+                        if cached_mode is not None:
+                            previous_status.target_temperature_type = cached_mode
                         data[device_id] = previous_status
                     _LOGGER.debug(
                         "Device %s returned an incomplete status; retained "

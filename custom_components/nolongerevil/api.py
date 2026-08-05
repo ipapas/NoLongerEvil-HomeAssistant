@@ -160,10 +160,18 @@ class NLEDeviceStatus:
 
         # Get state data
         state = self._data.get("state", {})
+        if not isinstance(state, dict):
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
 
         # Find the shared state data
         shared_key = f"shared.{self.serial}"
         shared_obj = state.get(shared_key, {})
+        if not isinstance(shared_obj, dict):
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
         shared_data = shared_obj.get("value", {})
         if not isinstance(shared_data, dict) or not shared_data:
             raise NLEIncompleteStatusError(
