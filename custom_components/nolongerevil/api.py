@@ -31,6 +31,7 @@ from .exceptions import (
     NLEAuthenticationError,
     NLEConnectionError,
     NLEError,
+    NLEIncompleteStatusError,
     NLERateLimitError,
 )
 
@@ -164,6 +165,10 @@ class NLEDeviceStatus:
         shared_key = f"shared.{self.serial}"
         shared_obj = state.get(shared_key, {})
         shared_data = shared_obj.get("value", {})
+        if not isinstance(shared_data, dict) or not shared_data:
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
 
         # Find the device settings data
         device_key = f"device.{self.serial}"

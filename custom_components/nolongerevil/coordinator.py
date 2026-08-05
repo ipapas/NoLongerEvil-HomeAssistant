@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import NLEClientBase, NLEDevice, NLEDeviceStatus
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
+from .exceptions import NLEIncompleteStatusError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,6 +107,17 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                         device_id,
                         auth_probe_result,
                         err,
+                    )
+                except NLEIncompleteStatusError:
+                    # Preserve the last complete snapshot when shared state is omitted.
+                    previous_status = self.get_device_status(device_id)
+                    if previous_status is not None:
+                        data[device_id] = previous_status
+                    _LOGGER.debug(
+                        "Device %s returned an incomplete status; retained "
+                        "last known status: %s",
+                        device_id,
+                        previous_status is not None,
                     )
                 except NLEError as err:
                     # Transient per-device errors (e.g. occasional HTTP 502 from
